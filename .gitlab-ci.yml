@@ -1,0 +1,38 @@
+    
+deploy_development:
+  type: deploy
+  environment:
+    name: development
+    url: example.com
+  before_script:
+    - apt-get update -qq
+    - apt-get install -qq git
+    # Setup SSH deploy keys
+    - 'which ssh-agent || ( apt-get install -qq openssh-client )'
+    - eval $(ssh-agent -s)
+    - ssh-add <(echo "$SSH_PRIVATE_KEY")
+    - mkdir -p ~/.ssh
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+  script:
+    - ssh $SSH_IP "cd /home/ec2-user/project-scoreboard && sudo git checkout working && sudo git pull && $ECR_LOGIN && docker system prune -f && sudo docker build -t scoreboard-service . && docker tag scoreboard-service:latest 394546882283.dkr.ecr.ca-central-1.amazonaws.com/scoreboard-service:latest && docker push 394546882283.dkr.ecr.ca-central-1.amazonaws.com/scoreboard-service:latest && exit"
+  only:
+    - working
+    
+deploy_production:
+  type: deploy
+  environment:
+    name: production
+    url: example.com
+  before_script:
+    - apt-get update -qq
+    - apt-get install -qq git
+    # Setup SSH deploy keys
+    - 'which ssh-agent || ( apt-get install -qq openssh-client )'
+    - eval $(ssh-agent -s)
+    - ssh-add <(echo "$PROD_SSH_PRIVATE_KEY")
+    - mkdir -p ~/.ssh
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+  script:
+    - ssh $PROD_SSH_IP "cd /home/ec2-user/project-scoreboard && sudo git checkout production && sudo git pull && $ECR_LOGIN && docker system prune -f && docker build -t scoreboard-service . && docker tag scoreboard-service:latest 202002617726.dkr.ecr.ca-central-1.amazonaws.com/scoreboard-service:latest && docker push 202002617726.dkr.ecr.ca-central-1.amazonaws.com/scoreboard-service:latest && exit"
+  only:
+    - production

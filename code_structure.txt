@@ -1,0 +1,98 @@
+a quick description of what is going on inside:
+
+main file that does the streaming and template matching is stream_jobs.py
+what it does:
+
+create queue and link an AWSWorker to it (more on this below) 
+while True:
+	check if we have a stream we have to run, if not sleep 5 seconds and try again
+	starts reading the stream in a separate thread (class StreamPlayerTwitch, more on this below)
+	while stream is running:
+		read current image from stream and its type (none, team summary, single player summary)
+		remember last good image (that was team summary)
+
+		if last good image was a team but we got a better team summary image:
+			replace last good image with this one
+		
+		if current image is single player summary but last good image was team summary:
+			send last good image to AWSWorker
+		
+		if last good image was single player summary:
+			replace last good image with this one (because once we see single player summaries next frames will contain more information)
+
+		if there were 150 frames between current frame and last good image:
+			sent last good image to AWSWorker
+			set last good image to None
+			
+		each 10 seconds will do a check on expired jobs and mark them
+		if current job is expired then it will end it
+		
+AWSWorker:
+	communicates with aws textract and S3 bucket
+	starts a separate thread in background and uses a queue to communicate with main thread
+	will receive any screenshots main program detects as summaries
+	upload them to S3
+	does textract and parses the result
+	and adds the new screen into the table 'jobs' for current job_id
+	
+StreamPlayerTwitch:
+	initialized each time a stream is detected as running
+	will have a background thread that reads that stream and writes it to a temporary mpg file
+	we also have a VideoCapture class (from OpenCV) that reads the stream frame by frame 
+	(having a temporary file is the only solution we have for communicating between a VideoCapture and a streamlink stream)
+	
+	basic algorithm:
+		init stream
+		init temp mpg file and instruct VideoCapture class to read from it
+		we have two modes of operating, one is frame_by_frame, other is skipping frames if we are reading the stream too far behind
+			(controlled by boolean variable skip_frames)
+		we automatically switch on the frame by frame mode when we detect a possible summary
+		we switch off frame by frame mode after we have identified a good single player summary and sent it to AWSWorker
+		
+		we also have special code when in skip_frame mode to check position in VideoCapture file and we compare it with real time
+		if we are too far behind we skip until we are a few seconds behind the stream
+		if we are not lagging we wait a little because we want the thread that reads from stream and writes to temp video file
+			to catch up with the stream so we won't be reading behind the end of video file when we ask for a frame					 						
+			
+
+
+
+A few words about template matching:
+	this goes on in file recognize.py
+	we have a few functions used:
+		is_good_candidate_single_player(img):
+			returns True if we think this image might be a good candidate for single player summary
+			False otherewise
+			
+			what it does:
+				tries to match the upper right 'Squad placed' bitmap
+				if no match returns False
+				
+				tries to match the 'Playing with friends' bitmap
+				if no match returns False
+				
+				tries to detect corner box for player stats
+				if no match returns False
+				
+				tries to detect the continue button which is in the lower part of the image
+				this is because we don't want partial images
+				if no match returns False
+				
+				finally all tests ok, returns True
+				
+			all image coordinates for matching are computed from screens at 1900x1200 
+			and re-scaled to match real image size
+			
+		
+		def is_good_candidate_team_summary(img):
+			this is a loose function, tries to find only if we are in summary/replay mode
+			by template matching the 'Summary' red tab that appears after player was killed
+			
+		def is_best_team_summary(img):
+			returns True only if we identify a few elements of the squad results summary screen
+			
+			'Summary' tab must be colored in red
+			we must have at least one corner of the 3 players in squad results
+			 
+						 			
+ 			
